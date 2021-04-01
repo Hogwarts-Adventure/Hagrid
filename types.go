@@ -10,6 +10,7 @@ import (
 	"math/rand"
 	"os"
 	"runtime"
+	"strings"
 	"time"
 )
 
@@ -76,3 +77,73 @@ func (hg *Hagrid) GetGuild() *discordgo.Guild {
 }
 
 /* Fin Système */
+
+/* Base de données */
+
+type AlluserDbUser struct {
+	Id string
+	Lang string
+}
+
+type Maison struct {
+	Id uint8
+	Points uint16
+	Nom string
+	Identifiers MaisonIdentifier
+}
+
+type UsersDbUser struct {
+	Id string
+	Maison string
+}
+
+type AllDbUser struct {
+	Id string
+	Author *discordgo.User
+	Alluser AlluserDbUser
+	Users UsersDbUser
+}
+
+/* Fin Base de données */
+
+type MaisonIdentifier struct {
+	DbId uint8
+	Name string
+	RoleId string
+}
+
+var (
+	Maisons = map[string]MaisonIdentifier{
+		"GRYFFONDOR": {
+			RoleId: "796774549232287754",
+		},
+		"POUFSOUFFLE": {
+			RoleId: "796775145317859373",
+		},
+		"SERPENTARD": {
+			RoleId: "796774926383972383",
+		},
+		"SERDAIGLE": {
+			RoleId: "796775403707826227",
+		},
+	}
+	MaisonsNames = func() []string {
+		keys := make([]string, 0, 4)
+		for k := range Maisons {
+			keys = append(keys, k)
+		}
+		return keys
+	}()
+)
+
+func GetMaison(val interface{}) *Maison {
+	toRet := &Maison{}
+	switch val.(type) {
+	case string:
+		name := strings.ToUpper(val.(string))
+		if pos := StringSliceFind(MaisonsNames, name); pos != -1 {
+			toRet.Identifiers = Maisons[name]
+		}
+	}
+	return toRet
+}
