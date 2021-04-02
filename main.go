@@ -52,14 +52,27 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		Author: m.Author,
 		Users: UsersDbUser{
 			Id: m.Author.ID,
+			Maison: &Maison{},
 		},
 		Alluser: AlluserDbUser{
 			Id: m.Author.ID,
 		},
 	}
-	err = hg.DB.QueryRow(context.Background(), "SELECT users.maison, alluser.lang FROM users INNER JOIN alluser ON users.id = alluser.id WHERE id = $1", m.Author.ID).Scan(&userDb.Users.Maison, &userDb.Alluser.Lang)
+	_ = hg.DB.QueryRow(context.Background(), "SELECT users.maison, alluser.lang FROM users INNER JOIN alluser ON users.id = alluser.id WHERE users.id = $1", m.Author.ID).Scan(&userDb.Users.Maison.Name, &userDb.Alluser.Lang)
 
-	if userDb.Users.Maison
+	
+	if userDb.Users.Maison.Name != "" { // si il a une maison
+		userDb.Users.Maison = hg.GetMaison(userDb.Users.Maison.Name, false)
+		house := userDb.Users.Maison
+		for r := range MaisonsIdenfiers {
+			rid := MaisonsIdenfiers[r].RoleId
+			if rid == house.RoleId && StringSliceFind(m.Member.Roles, house.RoleId) == -1 { // si c'est sa maison et qu'il n'a pas le rôle
+				_ = s.GuildMemberRoleAdd(m.GuildID, m.Author.ID, rid)
+			} else if rid != house.RoleId && StringSliceFind(m.Member.Roles, house.RoleId) != -1 { // si ce n'est pas sa maison mais qu'il a le rôle
+				_ = s.GuildMemberRoleRemove(m.GuildID, m.Author.ID, rid)
+			}
+		}
+	}
 }
 
 func ready(s *discordgo.Session, _ *discordgo.Ready) {
