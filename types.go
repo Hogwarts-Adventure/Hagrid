@@ -23,6 +23,8 @@ type Config struct {
 	GuildId string `json:"guildId"`
 	PgLocalhostURL string `json:"pgLocalhostURL"`
 	PgDistantURL string `json:"pgDistantURL"`
+	IntroReactionId string `json:"introReactionId"`
+	IntroReactionRoles []string `json:"introReactionRoles"`
 }
 
 type Hagrid struct {

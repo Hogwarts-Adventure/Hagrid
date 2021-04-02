@@ -10,21 +10,22 @@ import (
 	"syscall"
 )
 
-var hg = NewHagrid()
+var Hg = NewHagrid()
 
 func main() {
-	dg, err := discordgo.New("Bot " + hg.Config.Token)
+	dg, err := discordgo.New("Bot " + Hg.Config.Token)
 	if err != nil {
 		log.Fatal("Erreur création du client")
 	}
 
-	hg.Session = dg
+	Hg.Session = dg
 
-	hg.ConnectDb()
-	defer hg.DB.Close(context.Background())
+	Hg.ConnectDb()
+	defer Hg.DB.Close(context.Background())
 
 	dg.AddHandler(ready)
 	dg.AddHandler(messageCreate)
+	dg.AddHandler(messageReactionAdd)
 
 	err = dg.Open()
 	if err != nil {
@@ -58,18 +59,28 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 			Id: m.Author.ID,
 		},
 	}
-	_ = hg.DB.QueryRow(context.Background(), "SELECT users.maison, alluser.lang FROM users INNER JOIN alluser ON users.id = alluser.id WHERE users.id = $1", m.Author.ID).Scan(&userDb.Users.Maison.Name, &userDb.Alluser.Lang)
+	_ = Hg.DB.QueryRow(context.Background(), "SELECT users.maison, alluser.lang FROM users INNER JOIN alluser ON users.id = alluser.id WHERE users.id = $1", m.Author.ID).Scan(&userDb.Users.Maison.Name, &userDb.Alluser.Lang)
 
 	
 	if userDb.Users.Maison.Name != "" { // si il a une maison
-		userDb.Users.Maison = hg.GetMaison(userDb.Users.Maison.Name, false)
+		userDb.Users.Maison = Hg.GetMaison(userDb.Users.Maison.Name, false)
 		house := userDb.Users.Maison
-		for r := range MaisonsIdenfiers {
-			rid := MaisonsIdenfiers[r].RoleId
-			if rid == house.RoleId && StringSliceFind(m.Member.Roles, house.RoleId) == -1 { // si c'est sa maison et qu'il n'a pas le rôle
-				_ = s.GuildMemberRoleAdd(m.GuildID, m.Author.ID, rid)
-			} else if rid != house.RoleId && StringSliceFind(m.Member.Roles, house.RoleId) != -1 { // si ce n'est pas sa maison mais qu'il a le rôle
-				_ = s.GuildMemberRoleRemove(m.GuildID, m.Author.ID, rid)
+		for _, h := range MaisonsIdenfiers {
+			if h.RoleId == house.RoleId && StringSliceFind(m.Member.Roles, house.RoleId) == -1 { // si c'est sa maison et qu'il n'a pas le rôle
+				_ = s.GuildMemberRoleAdd(m.GuildID, m.Author.ID, h.RoleId)
+			} else if h.RoleId != house.RoleId && StringSliceFind(m.Member.Roles, house.RoleId) != -1 { // si ce n'est pas sa maison mais qu'il a le rôle
+				_ = s.GuildMemberRoleRemove(m.GuildID, m.Author.ID, h.RoleId)
+			}
+		}
+	}
+}
+
+func messageReactionAdd(s *discordgo.Session, r *discordgo.MessageReactionAdd) {
+	if r.MessageID == Hg.Config.IntroReactionId {
+		m, _ := s.GuildMember(r.GuildID, r.UserID)
+		for _, id := range Hg.Config.IntroReactionRoles {
+			if StringSliceFind(m.Roles, id) == -1 { // si il ne l'a pas
+				_ = s.GuildMemberRoleAdd(r.GuildID, r.UserID, id)
 			}
 		}
 	}
