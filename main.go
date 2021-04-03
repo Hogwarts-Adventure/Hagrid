@@ -7,7 +7,9 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
+	"time"
 )
 
 var Hg = NewHagrid()
@@ -39,28 +41,19 @@ func main() {
 }
 
 func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
-	channel, err := s.Channel(m.ChannelID)
-	if err != nil {
-		return
+	channel, err := s.State.Channel(m.ChannelID) // prend dans le cache
+	if err != nil { // si pas dans le cache
+		var nErr error
+		if channel, nErr = s.Channel(m.ChannelID); nErr != nil {
+			return
+		}
 	}
 
 	if m.Author.Bot || channel.Type == discordgo.ChannelTypeDM || channel.Type == discordgo.ChannelTypeGroupDM {
 		return
 	}
 
-	userDb := AllDbUser{
-		Id: m.Author.ID,
-		Author: m.Author,
-		Users: UsersDbUser{
-			Id: m.Author.ID,
-			Maison: &Maison{},
-		},
-		Alluser: AlluserDbUser{
-			Id: m.Author.ID,
-		},
-	}
-	_ = Hg.DB.QueryRow(context.Background(), "SELECT users.maison, alluser.lang FROM users INNER JOIN alluser ON users.id = alluser.id WHERE users.id = $1", m.Author.ID).Scan(&userDb.Users.Maison.Name, &userDb.Alluser.Lang)
-
+	userDb := Hg.GetUserDb(m.Author.ID)
 	
 	if userDb.Users.Maison.Name != "" { // si il a une maison
 		userDb.Users.Maison = Hg.GetMaison(userDb.Users.Maison.Name, false)
@@ -76,13 +69,81 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 }
 
 func messageReactionAdd(s *discordgo.Session, r *discordgo.MessageReactionAdd) {
-	if r.MessageID == Hg.Config.IntroReactionId {
-		m, _ := s.GuildMember(r.GuildID, r.UserID)
+	member, err := Hg.GetMember(r.UserID)
+	if err != nil || member.User.Bot {
+		return
+	}
+
+	if r.MessageID == Hg.Config.IntroReactionId { // reaction rôle
 		for _, id := range Hg.Config.IntroReactionRoles {
-			if StringSliceFind(m.Roles, id) == -1 { // si il ne l'a pas
+			if StringSliceFind(member.Roles, id) == -1 { // si il ne l'a pas
 				_ = s.GuildMemberRoleAdd(r.GuildID, r.UserID, id)
 			}
 		}
+	} else if r.MessageID == Hg.Config.TicketReactionId { // ticket support
+		// vérifie si salon n'existe pas déjà
+		channels, _ := s.GuildChannels(r.GuildID)
+		for _, channel := range channels {
+			if strings.HasPrefix(channel.Topic, r.UserID) { // salon support existe déjà
+				_, _ = s.ChannelMessageSend(channel.ID, "<@" + r.UserID + "> " + Hg.GetLang("ticketChannelAlreadyExists", r.UserID))
+				return
+			}
+		}
+
+		user := Hg.GetUserDb(r.UserID)
+		perms := int64(discordgo.PermissionViewChannel + discordgo.PermissionSendMessages + discordgo.PermissionAttachFiles + discordgo.PermissionReadMessageHistory + discordgo.PermissionUseExternalEmojis + discordgo.PermissionAddReactions)
+		createData := discordgo.GuildChannelCreateData{
+			Name: member.User.Username,
+			Type: discordgo.ChannelTypeGuildText,
+			Topic: r.UserID,
+			ParentID: Hg.Config.TicketCategoryId,
+			PermissionOverwrites: []*discordgo.PermissionOverwrite{
+				{
+					ID: r.GuildID,
+					Deny: discordgo.PermissionViewChannel,
+				},
+				{
+					ID: r.UserID,
+					Allow: perms,
+				},
+			},
+		}
+		// ajoute pour les rôles autorisés
+		for _, role := range Hg.Config.TicketAllowedRoles {
+			createData.PermissionOverwrites = append(createData.PermissionOverwrites, &discordgo.PermissionOverwrite{
+				ID: role,
+				Allow: perms,
+			})
+		}
+		// crée le salon
+		channel, e := s.GuildChannelCreateComplex(r.GuildID, createData)
+		if e != nil {
+			fmt.Println(e)
+			// si erreur, message => supprimé 10s après envoie
+			m, _ := s.ChannelMessageSend(r.ChannelID, Hg.GetLang("ticketError", user.Alluser.Lang))
+			time.AfterFunc(time.Second * 10, func(){
+				_ = s.ChannelMessageDelete(r.ChannelID, m.ID)
+			})
+			return
+		}
+		// sinon envoie embed
+		_, _ = s.ChannelMessageSendEmbed(channel.ID, &discordgo.MessageEmbed{
+			Author: &discordgo.MessageEmbedAuthor{
+				Name: member.User.Username,
+			},
+			Footer: &discordgo.MessageEmbedFooter{
+				Text: s.State.User.Username,
+			},
+			Description: Hg.GetLang("ticketMessage", user.Alluser.Lang),
+		})
+		_, _ = s.ChannelMessageSend(channel.ID, strings.Replace(
+			Hg.GetLang("afterTicketMention", "fr"),
+			"(uid)",
+			user.Id,
+			-1),
+		)
+		_ = s.MessageReactionsRemoveAll(r.ChannelID, r.MessageID)
+		_ = s.MessageReactionAdd(r.ChannelID, r.MessageID, r.Emoji.ID)
 	}
 }
 
