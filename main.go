@@ -41,12 +41,13 @@ func main() {
 }
 
 func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
-	channel, err := s.State.Channel(m.ChannelID) // prend dans le cache
-	if err != nil { // si pas dans le cache
-		var nErr error
-		if channel, nErr = s.Channel(m.ChannelID); nErr != nil {
-			return
-		}
+	if m.GuildID != Hg.Config.GuildId {
+		return
+	}
+
+	channel, err := Hg.GetChannel(m.ChannelID)
+	if err != nil {
+		return
 	}
 
 	if m.Author.Bot || channel.Type == discordgo.ChannelTypeDM || channel.Type == discordgo.ChannelTypeGroupDM {
@@ -69,6 +70,10 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 }
 
 func messageReactionAdd(s *discordgo.Session, r *discordgo.MessageReactionAdd) {
+	if r.GuildID != Hg.Config.GuildId {
+		return
+	}
+
 	member, err := Hg.GetMember(r.UserID)
 	if err != nil || member.User.Bot {
 		return
@@ -147,7 +152,10 @@ func messageReactionAdd(s *discordgo.Session, r *discordgo.MessageReactionAdd) {
 	}
 }
 
-func ready(s *discordgo.Session, _ *discordgo.Ready) {
+func ready(s *discordgo.Session, r *discordgo.Ready) {
 	_ = s.UpdateGameStatus(0, "vous surveiller bande d'ingrats -_-")
 	fmt.Println("Bot connecté !")
+	for _, g := range r.Guilds {
+		fmt.Printf("\t%s (ID: %s)\n", g.Name, g.ID)
+	}
 }
