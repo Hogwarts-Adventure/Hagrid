@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"github.com/bwmarrin/discordgo"
 	"github.com/jackc/pgx"
 	"io/ioutil"
@@ -25,17 +26,22 @@ type Config struct {
 	PgDistantURL string `json:"pgDistantURL"`
 	IntroReactionId string `json:"introReactionId"`
 	IntroReactionRoles []string `json:"introReactionRoles"`
+	TicketReactionId string `json:"ticketReactionId"`
+	TicketAllowedRoles []string `json:"ticketAllowedRoles"`
+	TicketCategoryId string `json:"ticketCategoryId"`
 }
 
 type Hagrid struct {
 	Session *discordgo.Session
 	Config *Config
 	DB *pgx.Conn
+	Lang map[string]interface{}
 }
 
 func NewHagrid() Hagrid {
 	hg := Hagrid{}
 	hg.readConfig()
+	hg.readLanguages()
 	rand.Seed(time.Now().UnixNano()) // initialiser rand
 	return hg
 }
@@ -59,6 +65,17 @@ func (hg *Hagrid) readConfig() {
 	}
 }
 
+func (hg *Hagrid) readLanguages() {
+	d, err := os.Open("res/lang.json")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer d.Close()
+
+	data, _ := ioutil.ReadAll(d)
+	_ = json.Unmarshal(data, &hg.Lang)
+}
+
 func (hg *Hagrid) ConnectDb() {
 	pgUrl := hg.Config.PgLocalhostURL
 
@@ -75,7 +92,11 @@ func (hg *Hagrid) ConnectDb() {
 }
 
 func (hg *Hagrid) GetGuild() *discordgo.Guild {
-	g, err := hg.Session.Guild(hg.Config.GuildId)
+	if g, err := hg.Session.State.Guild(hg.Config.GuildId); err == nil {
+		return g // est déjà dans le cache
+	}
+
+	g, err := hg.Session.Guild(hg.Config.GuildId) // pas dans le cache => on la fetch
 	if err != nil {
 		log.Fatal("Le serveur est innaccessible.")
 	}
@@ -105,7 +126,7 @@ type UsersDbUser struct {
 
 type AllDbUser struct {
 	Id string
-	Author *discordgo.User
+	Author *discordgo.Member
 	Alluser AlluserDbUser
 	Users UsersDbUser
 }
@@ -172,3 +193,59 @@ func (hg *Hagrid) GetMaison(val interface{}, queryDb bool) *Maison {
 	}
 	return toRet
 }
+
+func (hg *Hagrid) GetUserDb(userId string) *AllDbUser {
+	author, _ := hg.GetMember(userId)
+	userDb := AllDbUser{
+		Id: userId,
+		Author: author,
+		Users: UsersDbUser{
+			Id: userId,
+			Maison: &Maison{},
+		},
+		Alluser: AlluserDbUser{
+			Id: userId,
+		},
+	}
+	_ = Hg.DB.QueryRow(context.Background(), "SELECT users.maison, alluser.lang FROM users INNER JOIN alluser ON users.id = alluser.id WHERE users.id = $1", userId).Scan(&userDb.Users.Maison.Name, &userDb.Alluser.Lang)
+	if userDb.Alluser.Lang == "" {
+		userDb.Alluser.Lang = "fr"
+	}
+	return &userDb
+}
+
+// len(lang) != 2 => fetch utilisateur
+func (hg *Hagrid) GetLang(search string, lang string) string {
+	if len(lang) != 2 {
+		lang = hg.GetUserDb(lang).Alluser.Lang
+	}
+	s := hg.Lang[search]
+	if s == nil {
+		return "error lang"
+	}
+	return s.(map[string]interface{})[lang].(string)
+}
+
+func (hg *Hagrid) GetMember(memberId string) (*discordgo.Member, error) {
+	m, err := hg.Session.State.Member(hg.Config.GuildId, memberId)
+	if err != nil {
+		var nErr error
+		if m, nErr = hg.Session.GuildMember(hg.Config.GuildId, memberId); nErr != nil {
+			return nil, errors.New("no member")
+		}
+	}
+	return m, nil
+}
+
+func (hg *Hagrid) GetChannel(channelId string) (*discordgo.Channel, error) {
+	c, err := hg.Session.State.Channel(channelId)
+	if err != nil {
+		var nErr error
+		if c, nErr = hg.Session.Channel(channelId); nErr != nil {
+			return nil, errors.New("no channel")
+		}
+	}
+	return c, nil
+}
+
+/* Fin Base de données */
