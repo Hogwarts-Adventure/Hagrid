@@ -11,6 +11,7 @@ import (
 	"math/rand"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -30,6 +31,7 @@ type Config struct {
 	TicketAllowedRoles []string `json:"ticketAllowedRoles"`
 	TicketCategoryID string `json:"ticketCategoryID"`
 	TicketEmojiID string `json:"ticketEmojiID"`
+	PremiumRoleID string `json:"premiumRoleID"`
 }
 
 type Hagrid struct {
@@ -123,6 +125,7 @@ type Maison struct {
 type UsersDbUser struct {
 	ID string
 	Maison *Maison
+	DatePremium time.Time
 }
 
 type AllDbUser struct {
@@ -208,9 +211,17 @@ func (hg *Hagrid) GetUserDb(userID string) *AllDbUser {
 			ID: userID,
 		},
 	}
-	_ = Hg.DB.QueryRow(context.Background(), "SELECT users.maison, alluser.lang FROM users INNER JOIN alluser ON users.id = alluser.id WHERE users.id = $1", userID).Scan(&userDb.Users.Maison.Name, &userDb.Alluser.Lang)
+
+	var prem string
+	_ = Hg.DB.QueryRow(context.Background(), `SELECT users.maison, users."datePremium", alluser.lang FROM users INNER JOIN alluser ON users.id = alluser.id WHERE users.id = $1`, userID).Scan(&userDb.Users.Maison.Name, &prem, &userDb.Alluser.Lang)
 	if userDb.Alluser.Lang == "" {
 		userDb.Alluser.Lang = "fr"
+	}
+	premInt, err := strconv.ParseInt(prem, 10, 64)
+	if err != nil || premInt == 0 {
+		userDb.Users.DatePremium = time.Unix(0, 0)
+	} else {
+		userDb.Users.DatePremium = time.Unix(premInt/1000, 0)
 	}
 	return &userDb
 }

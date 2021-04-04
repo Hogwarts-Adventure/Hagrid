@@ -55,7 +55,6 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	}
 
 	userDb := Hg.GetUserDb(m.Author.ID)
-	
 	if userDb.Users.Maison.Name != "" { // si il a une maison
 		userDb.Users.Maison = Hg.GetMaison(userDb.Users.Maison.Name, false)
 		house := userDb.Users.Maison
@@ -64,6 +63,18 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 				_ = s.GuildMemberRoleAdd(m.GuildID, m.Author.ID, h.RoleID)
 			} else if h.RoleID != house.RoleID && StringSliceFind(m.Member.Roles, house.RoleID) != -1 { // si ce n'est pas sa maison mais qu'il a le rôle
 				_ = s.GuildMemberRoleRemove(m.GuildID, m.Author.ID, h.RoleID)
+			}
+		}
+		if userDb.Users.DatePremium != time.Unix(0, 0) {
+			if userDb.Users.DatePremium.Before(time.Now()) {
+				_, _ = Hg.DB.Exec(context.Background(), `UPDATE users SET "datePremium" = '' WHERE id = $1`, userDb.ID)
+				if pos := StringSliceFind(userDb.Author.Roles, Hg.Config.PremiumRoleID); pos != -1 {
+					_ = s.GuildMemberRoleRemove(m.GuildID, userDb.ID, Hg.Config.PremiumRoleID)
+				}
+			} else {
+				if pos := StringSliceFind(userDb.Author.Roles, Hg.Config.PremiumRoleID); pos == -1 {
+					_ = s.GuildMemberRoleAdd(m.GuildID, userDb.ID, Hg.Config.PremiumRoleID)
+				}
 			}
 		}
 	}
