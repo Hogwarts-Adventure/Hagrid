@@ -41,12 +41,13 @@ func main() {
 }
 
 func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
-	channel, err := s.State.Channel(m.ChannelID) // prend dans le cache
-	if err != nil { // si pas dans le cache
-		var nErr error
-		if channel, nErr = s.Channel(m.ChannelID); nErr != nil {
-			return
-		}
+	if m.GuildID != Hg.Config.GuildID {
+		return
+	}
+
+	channel, err := Hg.GetChannel(m.ChannelID)
+	if err != nil {
+		return
 	}
 
 	if m.Author.Bot || channel.Type == discordgo.ChannelTypeDM || channel.Type == discordgo.ChannelTypeGroupDM {
@@ -54,35 +55,54 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	}
 
 	userDb := Hg.GetUserDb(m.Author.ID)
-	
 	if userDb.Users.Maison.Name != "" { // si il a une maison
 		userDb.Users.Maison = Hg.GetMaison(userDb.Users.Maison.Name, false)
 		house := userDb.Users.Maison
 		for _, h := range MaisonsIdenfiers {
-			if h.RoleId == house.RoleId && StringSliceFind(m.Member.Roles, house.RoleId) == -1 { // si c'est sa maison et qu'il n'a pas le rôle
-				_ = s.GuildMemberRoleAdd(m.GuildID, m.Author.ID, h.RoleId)
-			} else if h.RoleId != house.RoleId && StringSliceFind(m.Member.Roles, house.RoleId) != -1 { // si ce n'est pas sa maison mais qu'il a le rôle
-				_ = s.GuildMemberRoleRemove(m.GuildID, m.Author.ID, h.RoleId)
+			if h.RoleID == house.RoleID && StringSliceFind(m.Member.Roles, house.RoleID) == -1 { // si c'est sa maison et qu'il n'a pas le rôle
+				_ = s.GuildMemberRoleAdd(m.GuildID, m.Author.ID, h.RoleID)
+			} else if h.RoleID != house.RoleID && StringSliceFind(m.Member.Roles, house.RoleID) != -1 { // si ce n'est pas sa maison mais qu'il a le rôle
+				_ = s.GuildMemberRoleRemove(m.GuildID, m.Author.ID, h.RoleID)
+			}
+		}
+		if userDb.Users.DatePremium != time.Unix(0, 0) {
+			if userDb.Users.DatePremium.Before(time.Now()) {
+				_, _ = Hg.DB.Exec(context.Background(), `UPDATE users SET "datePremium" = '' WHERE id = $1`, userDb.ID)
+				if pos := StringSliceFind(userDb.Author.Roles, Hg.Config.PremiumRoleID); pos != -1 {
+					_ = s.GuildMemberRoleRemove(m.GuildID, userDb.ID, Hg.Config.PremiumRoleID)
+				}
+			} else {
+				if pos := StringSliceFind(userDb.Author.Roles, Hg.Config.PremiumRoleID); pos == -1 {
+					_ = s.GuildMemberRoleAdd(m.GuildID, userDb.ID, Hg.Config.PremiumRoleID)
+				}
 			}
 		}
 	}
 }
 
 func messageReactionAdd(s *discordgo.Session, r *discordgo.MessageReactionAdd) {
+	if r.GuildID != Hg.Config.GuildID {
+		return
+	}
+
 	member, err := Hg.GetMember(r.UserID)
 	if err != nil || member.User.Bot {
 		return
 	}
 
-	if r.MessageID == Hg.Config.IntroReactionId { // reaction rôle
+	if r.MessageID == Hg.Config.IntroReactionID { // reaction rôle
 		for _, id := range Hg.Config.IntroReactionRoles {
 			if StringSliceFind(member.Roles, id) == -1 { // si il ne l'a pas
 				_ = s.GuildMemberRoleAdd(r.GuildID, r.UserID, id)
 			}
 		}
-	} else if r.MessageID == Hg.Config.TicketReactionId { // ticket support
+	} else if r.MessageID == Hg.Config.TicketReactionID && r.Emoji.ID == Hg.Config.TicketEmojiID { // ticket support
 		// vérifie si salon n'existe pas déjà
 		channels, _ := s.GuildChannels(r.GuildID)
+
+		defer s.MessageReactionAdd(r.ChannelID, r.MessageID, r.Emoji.APIName())
+		defer s.MessageReactionsRemoveAll(r.ChannelID, r.MessageID)
+
 		for _, channel := range channels {
 			if strings.HasPrefix(channel.Topic, r.UserID) { // salon support existe déjà
 				_, _ = s.ChannelMessageSend(channel.ID, "<@" + r.UserID + "> " + Hg.GetLang("ticketChannelAlreadyExists", r.UserID))
@@ -96,7 +116,7 @@ func messageReactionAdd(s *discordgo.Session, r *discordgo.MessageReactionAdd) {
 			Name: member.User.Username,
 			Type: discordgo.ChannelTypeGuildText,
 			Topic: r.UserID,
-			ParentID: Hg.Config.TicketCategoryId,
+			ParentID: Hg.Config.TicketCategoryID,
 			PermissionOverwrites: []*discordgo.PermissionOverwrite{
 				{
 					ID: r.GuildID,
@@ -139,15 +159,16 @@ func messageReactionAdd(s *discordgo.Session, r *discordgo.MessageReactionAdd) {
 		_, _ = s.ChannelMessageSend(channel.ID, strings.Replace(
 			Hg.GetLang("afterTicketMention", "fr"),
 			"(uid)",
-			user.Id,
+			user.ID,
 			-1),
 		)
-		_ = s.MessageReactionsRemoveAll(r.ChannelID, r.MessageID)
-		_ = s.MessageReactionAdd(r.ChannelID, r.MessageID, r.Emoji.ID)
 	}
 }
 
-func ready(s *discordgo.Session, _ *discordgo.Ready) {
+func ready(s *discordgo.Session, r *discordgo.Ready) {
 	_ = s.UpdateGameStatus(0, "vous surveiller bande d'ingrats -_-")
 	fmt.Println("Bot connecté !")
+	for i, g := range r.Guilds {
+		fmt.Printf("\t%d => %s\n", i + 1, g.ID)
+	}
 }
