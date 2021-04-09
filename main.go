@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -20,6 +21,8 @@ func main() {
 		log.Fatal("Erreur création du client")
 	}
 
+	dg.Identify.Intents = discordgo.MakeIntent(discordgo.IntentsAll)
+
 	Hg.Session = dg
 
 	Hg.ConnectDb()
@@ -28,6 +31,8 @@ func main() {
 	dg.AddHandler(ready)
 	dg.AddHandler(messageCreate)
 	dg.AddHandler(messageReactionAdd)
+	dg.AddHandler(guildMemberAdd)
+	dg.AddHandler(guildMemberRemove)
 
 	err = dg.Open()
 	if err != nil {
@@ -156,13 +161,32 @@ func messageReactionAdd(s *discordgo.Session, r *discordgo.MessageReactionAdd) {
 			},
 			Description: Hg.GetLang("ticketMessage", user.Alluser.Lang),
 		})
-		_, _ = s.ChannelMessageSend(channel.ID, strings.Replace(
+		_, _ = s.ChannelMessageSend(channel.ID, strings.ReplaceAll(
 			Hg.GetLang("afterTicketMention", "fr"),
 			"(uid)",
-			user.ID,
-			-1),
+			user.ID),
 		)
 	}
+}
+
+func guildMemberAdd(s *discordgo.Session, m *discordgo.GuildMemberAdd) {
+	if m.GuildID != Hg.Config.GuildID {
+		return
+	}
+	user := Hg.GetUserDb(m.User.ID)
+	_, _ = s.ChannelMessageSend(Hg.Config.TrafficChannelID,
+		strings.ReplaceAll(
+			strings.ReplaceAll(
+				Hg.GetLang("welcomeMessage", user.Alluser.Lang), "{{mention}}", m.Mention()),
+				"{{count}}", strconv.Itoa(Hg.GetGuild().MemberCount)))
+}
+
+func guildMemberRemove(s *discordgo.Session, m *discordgo.GuildMemberRemove) {
+	if m.GuildID != Hg.Config.GuildID {
+		return
+	}
+	_,_ = s.ChannelMessageSend(Hg.Config.TrafficChannelID,
+		strings.ReplaceAll(Hg.GetLang("byeMessage", "fr"), "{{username}}", m.Mention() + "(`" + m.User.String() + "`)"))
 }
 
 func ready(s *discordgo.Session, r *discordgo.Ready) {

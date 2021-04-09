@@ -32,6 +32,7 @@ type Config struct {
 	TicketCategoryID string `json:"ticketCategoryID"`
 	TicketEmojiID string `json:"ticketEmojiID"`
 	PremiumRoleID string `json:"premiumRoleID"`
+	TrafficChannelID string `json:"trafficChannelID"`
 }
 
 type Hagrid struct {
