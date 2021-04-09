@@ -128,11 +128,13 @@ func messageReactionAdd(s *discordgo.Session, r *discordgo.MessageReactionAdd) {
 					Deny: discordgo.PermissionViewChannel,
 				},
 				{
+					Type: discordgo.PermissionOverwriteTypeMember,
 					ID: r.UserID,
 					Allow: perms,
 				},
 			},
 		}
+
 		// ajoute pour les rôles autorisés
 		for _, role := range Hg.Config.TicketAllowedRoles {
 			createData.PermissionOverwrites = append(createData.PermissionOverwrites, &discordgo.PermissionOverwrite{
