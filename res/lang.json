@@ -16,5 +16,13 @@
   },
   "afterTicketMention": {
     "fr": "<a:gif_annonce:707259263646695504> | <@(uid)>"
+  },
+  "welcomeMessage": {
+    "fr": "<a:Tada:786907164525592587> **| Bienvenue sur le serveur {{mention}} ! Je te laisse lire le <#698554156679692389> et <#738478512045817896>. Nous sommes désormais {{count}} !**",
+    "en": "<a:Tada:786907164525592587> **| Welcome {{mention}} ! I let you read <#698554156679692389> and <#738478512045817896>. Now, we are {{count}} !**",
+    "es": "<a:Tada:786907164525592587> **|  ¡Bienvenido al servidor! Te dejé leer las <#698554156679692389> y las <#738478512045817896>. Ya tenemos 12 años !**"
+  },
+  "byeMessage": {
+    "fr": "\uD83D\uDE26 **| {{username}} vient de partir du serveur.**"
   }
 }
