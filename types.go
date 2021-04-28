@@ -23,16 +23,25 @@ type Config struct {
 	Prefix string `json:"prefix"`
 	DevPrefix string `json:"devPrefix"`
 	GuildID string `json:"guildID"`
+
 	PgLocalhostURL string `json:"pgLocalhostURL"`
 	PgDistantURL string `json:"pgDistantURL"`
+
 	IntroReactionID string `json:"introReactionID"`
 	IntroReactionRoles []string `json:"introReactionRoles"`
+
 	TicketReactionID string `json:"ticketReactionID"`
 	TicketAllowedRoles []string `json:"ticketAllowedRoles"`
 	TicketCategoryID string `json:"ticketCategoryID"`
 	TicketEmojiID string `json:"ticketEmojiID"`
+
 	PremiumRoleID string `json:"premiumRoleID"`
+
 	TrafficChannelID string `json:"trafficChannelID"`
+
+	EnServiceMessageID string `json:"enServiceMessageID"`
+	EnServiceEmojiID  string `json:"enServiceEmojiID"`
+	EnServiceRoleID string `json:"enServiceRoleID"`
 }
 
 type Hagrid struct {

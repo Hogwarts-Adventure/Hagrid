@@ -15,7 +15,7 @@
     "es": "Ya tienes un canal para hacer tu pregunta."
   },
   "afterTicketMention": {
-    "fr": "<a:gif_annonce:707259263646695504> | <@(uid)>"
+    "fr": "<a:gif_annonce:707259263646695504> | <@(uid)> | <@797569524437090314>"
   },
   "welcomeMessage": {
     "fr": "<a:Tada:786907164525592587> **| Bienvenue sur le serveur {{mention}} ! Je te laisse lire le <#698554156679692389> et <#738478512045817896>. Nous sommes désormais {{count}} !**",
