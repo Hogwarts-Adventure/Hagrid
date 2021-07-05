@@ -168,7 +168,9 @@ func messageReactionAdd(s *discordgo.Session, r *discordgo.MessageReactionAdd) {
 			"(uid)",
 			user.ID),
 		)
-	}
+	}/* else if r.MessageID ==  { // rôle "en service"
+
+	}*/
 }
 
 func guildMemberAdd(s *discordgo.Session, m *discordgo.GuildMemberAdd) {
