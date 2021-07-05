@@ -45,7 +45,7 @@ func main() {
 	<-sc
 }
 
-func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
+func messageCreate(_ *discordgo.Session, m *discordgo.MessageCreate) {
 	if m.GuildID != Hg.Config.GuildID {
 		return
 	}
@@ -59,30 +59,7 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		return
 	}
 
-	userDb := Hg.GetUserDb(m.Author.ID)
-	if userDb.Users.Maison.Name != "" { // si il a une maison
-		userDb.Users.Maison = Hg.GetMaison(userDb.Users.Maison.Name, false)
-		house := userDb.Users.Maison
-		for _, h := range MaisonsIdenfiers {
-			if h.RoleID == house.RoleID && StringSliceFind(m.Member.Roles, house.RoleID) == -1 { // si c'est sa maison et qu'il n'a pas le rôle
-				_ = s.GuildMemberRoleAdd(m.GuildID, m.Author.ID, h.RoleID)
-			} else if h.RoleID != house.RoleID && StringSliceFind(m.Member.Roles, house.RoleID) != -1 { // si ce n'est pas sa maison mais qu'il a le rôle
-				_ = s.GuildMemberRoleRemove(m.GuildID, m.Author.ID, h.RoleID)
-			}
-		}
-		if userDb.Users.DatePremium != time.Unix(0, 0) {
-			if userDb.Users.DatePremium.Before(time.Now()) {
-				_, _ = Hg.DB.Exec(context.Background(), `UPDATE users SET "datePremium" = '' WHERE id = $1`, userDb.ID)
-				if pos := StringSliceFind(userDb.Author.Roles, Hg.Config.PremiumRoleID); pos != -1 {
-					_ = s.GuildMemberRoleRemove(m.GuildID, userDb.ID, Hg.Config.PremiumRoleID)
-				}
-			} else {
-				if pos := StringSliceFind(userDb.Author.Roles, Hg.Config.PremiumRoleID); pos == -1 {
-					_ = s.GuildMemberRoleAdd(m.GuildID, userDb.ID, Hg.Config.PremiumRoleID)
-				}
-			}
-		}
-	}
+	_ = Hg.CheckUserHouseRole(m.Author.ID, m.Member.Roles)
 }
 
 func messageReactionAdd(s *discordgo.Session, r *discordgo.MessageReactionAdd) {
@@ -193,10 +170,7 @@ func guildMemberRemove(s *discordgo.Session, m *discordgo.GuildMemberRemove) {
 		strings.ReplaceAll(Hg.GetLang("byeMessage", "fr"), "{{username}}", m.Mention() + "(`" + m.User.String() + "`)"))
 }
 
-func ready(s *discordgo.Session, r *discordgo.Ready) {
+func ready(s *discordgo.Session, _ *discordgo.Ready) {
 	_ = s.UpdateGameStatus(0, "vous surveiller bande d'ingrats -_-")
-	fmt.Println("Bot connecté !")
-	for i, g := range r.Guilds {
-		fmt.Printf("\t%d => %s\n", i + 1, g.ID)
-	}
+	fmt.Println(time.Now().Format("02-Jan-2006: 15h04m05s"), "Bot connecté !")
 }

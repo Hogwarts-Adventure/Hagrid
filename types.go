@@ -236,7 +236,7 @@ func (hg *Hagrid) GetUserDb(userID string) *AllDbUser {
 	return &userDb
 }
 
-// len(lang) != 2 => fetch utilisateur
+// GetLang : len(lang) != 2 => fetch utilisateur
 func (hg *Hagrid) GetLang(search string, lang string) string {
 	if len(lang) != 2 {
 		lang = hg.GetUserDb(lang).Alluser.Lang
@@ -271,3 +271,32 @@ func (hg *Hagrid) GetChannel(channelID string) (*discordgo.Channel, error) {
 }
 
 /* Fin Base de données */
+
+func (hg *Hagrid) CheckUserHouseRole(userID string, memberRoles []string) error {
+	userDb := Hg.GetUserDb(userID)
+	if userDb.Users.Maison.Name != "" { // si il a une maison
+		userDb.Users.Maison = Hg.GetMaison(userDb.Users.Maison.Name, false)
+		house := userDb.Users.Maison
+		for _, h := range MaisonsIdenfiers {
+			if h.RoleID == house.RoleID && StringSliceFind(memberRoles, house.RoleID) == -1 { // si c'est sa maison et qu'il n'a pas le rôle
+				_ = hg.Session.GuildMemberRoleAdd(hg.Config.GuildID, userID, h.RoleID)
+			} else if h.RoleID != house.RoleID && StringSliceFind(memberRoles, house.RoleID) != -1 { // si ce n'est pas sa maison mais qu'il a le rôle
+				_ = hg.Session.GuildMemberRoleRemove(hg.Config.GuildID, userID, h.RoleID)
+			}
+		}
+		if userDb.Users.DatePremium != time.Unix(0, 0) {
+			if userDb.Users.DatePremium.Before(time.Now()) {
+				_, _ = Hg.DB.Exec(context.Background(), `UPDATE users SET "datePremium" = '' WHERE id = $1`, userDb.ID)
+				if pos := StringSliceFind(userDb.Author.Roles, Hg.Config.PremiumRoleID); pos != -1 {
+					_ = hg.Session.GuildMemberRoleRemove(hg.Config.GuildID, userDb.ID, Hg.Config.PremiumRoleID)
+				}
+			} else {
+				if pos := StringSliceFind(userDb.Author.Roles, Hg.Config.PremiumRoleID); pos == -1 {
+					_ = hg.Session.GuildMemberRoleAdd(hg.Config.GuildID, userDb.ID, Hg.Config.PremiumRoleID)
+				}
+			}
+		}
+	}
+
+	return nil
+}
