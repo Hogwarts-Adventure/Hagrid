@@ -8,3 +8,11 @@ func StringSliceFind(slice []string, target string) int {
 	}
 	return -1
 }
+
+func StringSliceRemove(slice []string, index int) []string {
+	if index < 0 {
+		return slice
+	}
+	slice[index] = slice[len(slice) - 1]
+	return slice[:len(slice) - 1]
+}

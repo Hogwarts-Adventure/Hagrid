@@ -49,6 +49,7 @@ type Hagrid struct {
 	Config *Config
 	DB *pgx.Conn
 	Lang map[string]interface{}
+	CheckCooldowns []string
 }
 
 func NewHagrid() Hagrid {
@@ -56,6 +57,7 @@ func NewHagrid() Hagrid {
 	hg.readConfig()
 	hg.readLanguages()
 	rand.Seed(time.Now().UnixNano()) // initialiser rand
+	hg.CheckCooldowns = []string{}
 	return hg
 }
 

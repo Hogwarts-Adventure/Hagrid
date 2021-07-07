@@ -46,20 +46,21 @@ func main() {
 }
 
 func messageCreate(_ *discordgo.Session, m *discordgo.MessageCreate) {
-	if m.GuildID != Hg.Config.GuildID {
+	if m.GuildID != Hg.Config.GuildID || StringSliceFind(Hg.CheckCooldowns, m.Author.ID) != -1 {
 		return
 	}
 
 	channel, err := Hg.GetChannel(m.ChannelID)
-	if err != nil {
-		return
-	}
-
-	if m.Author.Bot || channel.Type == discordgo.ChannelTypeDM || channel.Type == discordgo.ChannelTypeGroupDM {
+	if err != nil || m.Author.Bot || channel.Type == discordgo.ChannelTypeDM || channel.Type == discordgo.ChannelTypeGroupDM {
 		return
 	}
 
 	_ = Hg.CheckUserHouseRole(m.Author.ID, m.Member.Roles)
+
+	Hg.CheckCooldowns = append(Hg.CheckCooldowns, m.Author.ID)
+	time.AfterFunc(time.Second * 20, func() {
+		Hg.CheckCooldowns = StringSliceRemove(Hg.CheckCooldowns, StringSliceFind(Hg.CheckCooldowns, m.Author.ID))
+	})
 }
 
 func messageReactionAdd(s *discordgo.Session, r *discordgo.MessageReactionAdd) {
