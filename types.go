@@ -12,52 +12,58 @@ import (
 	"os"
 	"runtime"
 	"strconv"
-	"strings"
 	"time"
 )
 
 /* Système */
 
 type Config struct {
-	Token string `json:"token"`
-	Prefix string `json:"prefix"`
-	DevPrefix string `json:"devPrefix"`
-	GuildID string `json:"guildID"`
-
-	PgLocalhostURL string `json:"pgLocalhostURL"`
-	PgDistantURL string `json:"pgDistantURL"`
-
-	IntroReactionID string `json:"introReactionID"`
-	IntroReactionRoles []string `json:"introReactionRoles"`
-
-	TicketReactionID string `json:"ticketReactionID"`
-	TicketAllowedRoles []string `json:"ticketAllowedRoles"`
-	TicketCategoryID string `json:"ticketCategoryID"`
-	TicketEmojiID string `json:"ticketEmojiID"`
-
-	PremiumRoleID string `json:"premiumRoleID"`
-
-	TrafficChannelID string `json:"trafficChannelID"`
-
-	EnServiceMessageID string `json:"enServiceMessageID"`
-	EnServiceEmojiID  string `json:"enServiceEmojiID"`
-	EnServiceRoleID string `json:"enServiceRoleID"`
+	Token                    string   `json:"token"`
+	Prefix                   string   `json:"prefix"`
+	DevPrefix                string   `json:"devPrefix"`
+	GuildID                  string   `json:"guildId"`
+	PgLocalhostURL           string   `json:"pgLocalhostURL"`
+	PgDistantURL             string   `json:"pgDistantURL"`
+	IntroReactionID          string   `json:"introReactionId"`
+	IntroReactionRoles       []string `json:"introReactionRoles"`
+	TicketReactionID         string   `json:"ticketReactionId"`
+	TicketAllowedRoles       []string `json:"ticketAllowedRoles"`
+	TicketCategoryID         string   `json:"ticketCategoryId"`
+	TicketEmojiID            string   `json:"ticketEmojiId"`
+	PremiumRoleID            string   `json:"premiumRoleId"`
+	TrafficChannelID         string   `json:"trafficChannelId"`
+	AssignableRolesChannelID string   `json:"assignableRolesChannelId"`
 }
 
 type Hagrid struct {
-	Session *discordgo.Session
-	Config *Config
-	DB *pgx.Conn
-	Lang map[string]interface{}
-	CheckCooldowns []string
+	Session             *discordgo.Session
+	Config              *Config
+	DB                  *pgx.Conn
+	Lang                map[string]interface{}
+	CheckHouseCooldowns []string
+	CommandsCooldowns   map[string]string
+	OtherCooldowns      map[string][]string
+	AssignableRoles     map[string]string
+}
+
+type House struct {
+	Points uint16
+	Name   string
+	RoleID string
 }
 
 func NewHagrid() Hagrid {
 	hg := Hagrid{}
 	hg.readConfig()
 	hg.readLanguages()
+	hg.readAssignableRoles()
+
 	rand.Seed(time.Now().UnixNano()) // initialiser rand
-	hg.CheckCooldowns = []string{}
+	hg.CheckHouseCooldowns = []string{}
+
+	hg.OtherCooldowns = make(map[string][]string)
+	hg.OtherCooldowns["intro"] = []string{}
+
 	return hg
 }
 
@@ -91,6 +97,17 @@ func (hg *Hagrid) readLanguages() {
 	_ = json.Unmarshal(data, &hg.Lang)
 }
 
+func (hg *Hagrid) readAssignableRoles() {
+	d, err := os.Open("res/assignable_roles.json")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer d.Close()
+
+	data, _ := ioutil.ReadAll(d)
+	_ = json.Unmarshal(data, &hg.AssignableRoles)
+}
+
 func (hg *Hagrid) ConnectDb() {
 	pgUrl := hg.Config.PgLocalhostURL
 
@@ -122,126 +139,86 @@ func (hg *Hagrid) GetGuild() *discordgo.Guild {
 
 /* Base de données */
 
-type AlluserDbUser struct {
-	ID string
-	Lang string
-}
-
-type Maison struct {
-	Points uint16
-	DbID int
-	Name string
-	RoleID string
-}
-
-type UsersDbUser struct {
-	ID string
-	Maison *Maison
+type Player struct {
+	ID          string
+	Lang        string
+	House       *House
 	DatePremium time.Time
+	Member      *discordgo.Member
 }
 
-type AllDbUser struct {
-	ID string
-	Author *discordgo.Member
-	Alluser AlluserDbUser
-	Users UsersDbUser
+func (player *Player) GetLang(search string) string {
+	return Hg.GetLang(search, player.Lang)
 }
 
 /* Fin Base de données */
 
 var (
-	MaisonsIdenfiers = map[string]*Maison{
+	HousesIdenfiers = map[string]*House{
 		"GRYFFONDOR": {
 			RoleID: "796774549232287754",
-			Name: "Gryffondor",
-			DbID: 1,
+			Name:   "Gryffondor",
 		},
 		"POUFSOUFFLE": {
 			RoleID: "796775145317859373",
-			Name: "Poufsouffle",
-			DbID: 3,
+			Name:   "Poufsouffle",
 		},
 		"SERPENTARD": {
 			RoleID: "796774926383972383",
-			Name: "Serpentard",
-			DbID: 2,
+			Name:   "Serpentard",
 		},
 		"SERDAIGLE": {
 			RoleID: "796775403707826227",
-			Name: "Serdaigle",
-			DbID: 4,
+			Name:   "Serdaigle",
 		},
 	}
-	MaisonsNames = func() []string {
+	HousesNames = func() []string {
 		keys := make([]string, 0, 4)
-		for k := range MaisonsIdenfiers {
+		for k := range HousesIdenfiers {
 			keys = append(keys, k)
 		}
 		return keys
 	}()
 )
 
-func (hg *Hagrid) GetMaison(val interface{}, queryDb bool) *Maison {
-	name := ""
-	switch val.(type) {
-	case string:
-		n := strings.ToUpper(val.(string))
-		if pos := StringSliceFind(MaisonsNames, n); pos != -1 {
-			name = n
+func (hg *Hagrid) GetHouse(name string, queryDb bool) *House {
+	var house *House
+	if StringSliceContains(HousesNames, name) {
+		house = &House{}
+		house = HousesIdenfiers[name]
+		if queryDb {
+			_ = hg.DB.QueryRow(context.Background(), "SELECT points FROM maisons WHERE nom = $1", name).Scan(&house.Points)
 		}
-		break
-	case int:
-		for m := range MaisonsIdenfiers {
-			if MaisonsIdenfiers[m].DbID == val.(int) {
-				name = m
-			}
-		}
-		break
 	}
-	if name == "" {
-		return nil
-	}
-
-	toRet := &Maison{}
-	toRet = MaisonsIdenfiers[name]
-	if queryDb {
-		_ = hg.DB.QueryRow(context.Background(), "SELECT points FROM maisons WHERE nom = $1", name).Scan(&toRet.Points)
-	}
-	return toRet
+	return house
 }
 
-func (hg *Hagrid) GetUserDb(userID string) *AllDbUser {
+func (hg *Hagrid) GetPlayer(userID string) *Player {
 	author, _ := hg.GetMember(userID)
-	userDb := AllDbUser{
-		ID: userID,
-		Author: author,
-		Users: UsersDbUser{
-			ID: userID,
-			Maison: &Maison{},
-		},
-		Alluser: AlluserDbUser{
-			ID: userID,
-		},
+	player := &Player{
+		ID:     userID,
+		Member: author,
+		House:  &House{},
 	}
 
 	var prem string
-	_ = Hg.DB.QueryRow(context.Background(), `SELECT users.maison, users."datePremium", alluser.lang FROM users INNER JOIN alluser ON users.id = alluser.id WHERE users.id = $1`, userID).Scan(&userDb.Users.Maison.Name, &prem, &userDb.Alluser.Lang)
-	if userDb.Alluser.Lang == "" {
-		userDb.Alluser.Lang = "fr"
+	_ = Hg.DB.QueryRow(context.Background(), `SELECT users.maison, users."datePremium", alluser.lang FROM users INNER JOIN alluser ON users.id = alluser.id WHERE users.id = $1`, userID).Scan(&player.House.Name, prem, &player.Lang)
+	if player.Lang == "" {
+		player.Lang = "fr"
 	}
 	premInt, err := strconv.ParseInt(prem, 10, 64)
 	if err != nil || premInt == 0 {
-		userDb.Users.DatePremium = time.Unix(0, 0)
+		player.DatePremium = time.Unix(0, 0)
 	} else {
-		userDb.Users.DatePremium = time.Unix(premInt/1000, 0)
+		player.DatePremium = time.Unix(premInt/1000, 0)
 	}
-	return &userDb
+	return player
 }
 
 // GetLang : len(lang) != 2 => fetch utilisateur
 func (hg *Hagrid) GetLang(search string, lang string) string {
 	if len(lang) != 2 {
-		lang = hg.GetUserDb(lang).Alluser.Lang
+		lang = hg.GetPlayer(lang).Lang
 	}
 	s := hg.Lang[search]
 	if s == nil {
@@ -275,26 +252,26 @@ func (hg *Hagrid) GetChannel(channelID string) (*discordgo.Channel, error) {
 /* Fin Base de données */
 
 func (hg *Hagrid) CheckUserHouseRole(userID string, memberRoles []string) error {
-	userDb := Hg.GetUserDb(userID)
-	if userDb.Users.Maison.Name != "" { // si il a une maison
-		userDb.Users.Maison = Hg.GetMaison(userDb.Users.Maison.Name, false)
-		house := userDb.Users.Maison
-		for _, h := range MaisonsIdenfiers {
-			if h.RoleID == house.RoleID && StringSliceFind(memberRoles, house.RoleID) == -1 { // si c'est sa maison et qu'il n'a pas le rôle
+	player := Hg.GetPlayer(userID)
+	if player.House.Name != "" { // si il a une maison
+		player.House = Hg.GetHouse(player.House.Name, false)
+		house := player.House
+		for _, h := range HousesIdenfiers {
+			if h.RoleID == house.RoleID && !StringSliceContains(memberRoles, house.RoleID) { // si c'est sa maison et qu'il n'a pas le rôle
 				_ = hg.Session.GuildMemberRoleAdd(hg.Config.GuildID, userID, h.RoleID)
-			} else if h.RoleID != house.RoleID && StringSliceFind(memberRoles, house.RoleID) != -1 { // si ce n'est pas sa maison mais qu'il a le rôle
+			} else if h.RoleID != house.RoleID && StringSliceContains(memberRoles, house.RoleID) { // si ce n'est pas sa maison mais qu'il a le rôle
 				_ = hg.Session.GuildMemberRoleRemove(hg.Config.GuildID, userID, h.RoleID)
 			}
 		}
-		if userDb.Users.DatePremium != time.Unix(0, 0) {
-			if userDb.Users.DatePremium.Before(time.Now()) {
-				_, _ = Hg.DB.Exec(context.Background(), `UPDATE users SET "datePremium" = '' WHERE id = $1`, userDb.ID)
-				if pos := StringSliceFind(userDb.Author.Roles, Hg.Config.PremiumRoleID); pos != -1 {
-					_ = hg.Session.GuildMemberRoleRemove(hg.Config.GuildID, userDb.ID, Hg.Config.PremiumRoleID)
+		if player.DatePremium != time.Unix(0, 0) {
+			if player.DatePremium.Before(time.Now()) {
+				_, _ = Hg.DB.Exec(context.Background(), `UPDATE users SET "datePremium" = '' WHERE id = $1`, player.ID)
+				if StringSliceContains(player.Member.Roles, Hg.Config.PremiumRoleID) {
+					_ = hg.Session.GuildMemberRoleRemove(hg.Config.GuildID, player.ID, Hg.Config.PremiumRoleID)
 				}
 			} else {
-				if pos := StringSliceFind(userDb.Author.Roles, Hg.Config.PremiumRoleID); pos == -1 {
-					_ = hg.Session.GuildMemberRoleAdd(hg.Config.GuildID, userDb.ID, Hg.Config.PremiumRoleID)
+				if !StringSliceContains(player.Member.Roles, Hg.Config.PremiumRoleID) {
+					_ = hg.Session.GuildMemberRoleAdd(hg.Config.GuildID, player.ID, Hg.Config.PremiumRoleID)
 				}
 			}
 		}

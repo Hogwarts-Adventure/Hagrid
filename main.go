@@ -13,6 +13,12 @@ import (
 	"time"
 )
 
+const (
+	CheckHouseCooldown       = time.Second * 30
+	FirewallCooldown         = time.Second * 20
+	TicketChannelPermissions = int64(discordgo.PermissionViewChannel + discordgo.PermissionSendMessages + discordgo.PermissionAttachFiles + discordgo.PermissionReadMessageHistory + discordgo.PermissionUseExternalEmojis + discordgo.PermissionAddReactions)
+)
+
 var Hg = NewHagrid()
 
 func main() {
@@ -31,6 +37,7 @@ func main() {
 	dg.AddHandler(ready)
 	dg.AddHandler(messageCreate)
 	dg.AddHandler(messageReactionAdd)
+	dg.AddHandler(messageReactionRemove)
 	dg.AddHandler(guildMemberAdd)
 	dg.AddHandler(guildMemberRemove)
 
@@ -46,129 +53,77 @@ func main() {
 }
 
 func messageCreate(_ *discordgo.Session, m *discordgo.MessageCreate) {
-	if m.GuildID != Hg.Config.GuildID || StringSliceFind(Hg.CheckCooldowns, m.Author.ID) != -1 {
+	// vérifications de base
+	if m.GuildID != Hg.Config.GuildID || m.Author.Bot {
 		return
+	}
+
+	// vérifier rôle maison
+	if StringSliceContains(Hg.CheckHouseCooldowns, m.Author.ID) {
+		_ = Hg.CheckUserHouseRole(m.Author.ID, m.Member.Roles)
+
+		Hg.CheckHouseCooldowns = append(Hg.CheckHouseCooldowns, m.Author.ID)
+		time.AfterFunc(CheckHouseCooldown, func() {
+			Hg.CheckHouseCooldowns = StringSliceRemoveTarget(Hg.CheckHouseCooldowns, m.Author.ID)
+		})
 	}
 
 	channel, err := Hg.GetChannel(m.ChannelID)
-	if err != nil || m.Author.Bot || channel.Type == discordgo.ChannelTypeDM || channel.Type == discordgo.ChannelTypeGroupDM {
+	if err != nil || channel.Type == discordgo.ChannelTypeDM || channel.Type == discordgo.ChannelTypeGroupDM {
 		return
 	}
-
-	_ = Hg.CheckUserHouseRole(m.Author.ID, m.Member.Roles)
-
-	Hg.CheckCooldowns = append(Hg.CheckCooldowns, m.Author.ID)
-	time.AfterFunc(time.Second * 20, func() {
-		Hg.CheckCooldowns = StringSliceRemove(Hg.CheckCooldowns, StringSliceFind(Hg.CheckCooldowns, m.Author.ID))
-	})
 }
 
-func messageReactionAdd(s *discordgo.Session, r *discordgo.MessageReactionAdd) {
-	if r.GuildID != Hg.Config.GuildID {
+func messageReactionAdd(session *discordgo.Session, reaction *discordgo.MessageReactionAdd) {
+	if reaction.GuildID != Hg.Config.GuildID {
 		return
 	}
 
-	member, err := Hg.GetMember(r.UserID)
-	if err != nil || member.User.Bot {
+	player := Hg.GetPlayer(reaction.UserID)
+	if player.Member.User.Bot {
 		return
 	}
 
-	if r.MessageID == Hg.Config.IntroReactionID { // reaction rôle
-		for _, id := range Hg.Config.IntroReactionRoles {
-			if StringSliceFind(member.Roles, id) == -1 { // si il ne l'a pas
-				_ = s.GuildMemberRoleAdd(r.GuildID, r.UserID, id)
-			}
-		}
-	} else if r.MessageID == Hg.Config.TicketReactionID && r.Emoji.ID == Hg.Config.TicketEmojiID { // ticket support
-		// vérifie si salon n'existe pas déjà
-		channels, _ := s.GuildChannels(r.GuildID)
+	// firewall
+	if reaction.MessageID == Hg.Config.IntroReactionID {
+		HandleFirewall(session, reaction, player)
+	} else if reaction.MessageID == Hg.Config.TicketReactionID && reaction.Emoji.ID == Hg.Config.TicketEmojiID { // ticket support
+		HandleTicketCreation(session, reaction, player)
+	} else if reaction.ChannelID == Hg.Config.AssignableRolesChannelID {
+		HandleAssignableRolesReactionAdd(session, reaction, player)
+	}
+}
 
-		defer s.MessageReactionAdd(r.ChannelID, r.MessageID, r.Emoji.APIName())
-		defer s.MessageReactionsRemoveAll(r.ChannelID, r.MessageID)
+func messageReactionRemove(session *discordgo.Session, reaction *discordgo.MessageReactionRemove) {
+	if reaction.GuildID != Hg.Config.GuildID {
+		return
+	}
 
-		for _, channel := range channels {
-			if strings.HasPrefix(channel.Topic, r.UserID) { // salon support existe déjà
-				_, _ = s.ChannelMessageSend(channel.ID, "<@" + r.UserID + "> " + Hg.GetLang("ticketChannelAlreadyExists", r.UserID))
-				return
-			}
-		}
+	player := Hg.GetPlayer(reaction.UserID)
 
-		user := Hg.GetUserDb(r.UserID)
-		perms := int64(discordgo.PermissionViewChannel + discordgo.PermissionSendMessages + discordgo.PermissionAttachFiles + discordgo.PermissionReadMessageHistory + discordgo.PermissionUseExternalEmojis + discordgo.PermissionAddReactions)
-		createData := discordgo.GuildChannelCreateData{
-			Name: member.User.Username,
-			Type: discordgo.ChannelTypeGuildText,
-			Topic: r.UserID,
-			ParentID: Hg.Config.TicketCategoryID,
-			PermissionOverwrites: []*discordgo.PermissionOverwrite{
-				{
-					ID: r.GuildID,
-					Deny: discordgo.PermissionViewChannel,
-				},
-				{
-					Type: discordgo.PermissionOverwriteTypeMember,
-					ID: r.UserID,
-					Allow: perms,
-				},
-			},
-		}
-
-		// ajoute pour les rôles autorisés
-		for _, role := range Hg.Config.TicketAllowedRoles {
-			createData.PermissionOverwrites = append(createData.PermissionOverwrites, &discordgo.PermissionOverwrite{
-				ID: role,
-				Allow: perms,
-			})
-		}
-		// crée le salon
-		channel, e := s.GuildChannelCreateComplex(r.GuildID, createData)
-		if e != nil {
-			fmt.Println(e)
-			// si erreur, message => supprimé 10s après envoie
-			m, _ := s.ChannelMessageSend(r.ChannelID, Hg.GetLang("ticketError", user.Alluser.Lang))
-			time.AfterFunc(time.Second * 10, func(){
-				_ = s.ChannelMessageDelete(r.ChannelID, m.ID)
-			})
-			return
-		}
-		// sinon envoie embed
-		_, _ = s.ChannelMessageSendEmbed(channel.ID, &discordgo.MessageEmbed{
-			Author: &discordgo.MessageEmbedAuthor{
-				Name: member.User.Username,
-			},
-			Footer: &discordgo.MessageEmbedFooter{
-				Text: s.State.User.Username,
-			},
-			Description: Hg.GetLang("ticketMessage", user.Alluser.Lang),
-		})
-		_, _ = s.ChannelMessageSend(channel.ID, strings.ReplaceAll(
-			Hg.GetLang("afterTicketMention", "fr"),
-			"(uid)",
-			user.ID),
-		)
-	}/* else if r.MessageID ==  { // rôle "en service"
-
-	}*/
+	if reaction.ChannelID == Hg.Config.AssignableRolesChannelID {
+		HandleAssignableRolesReactionRemove(session, reaction, player)
+	}
 }
 
 func guildMemberAdd(s *discordgo.Session, m *discordgo.GuildMemberAdd) {
 	if m.GuildID != Hg.Config.GuildID {
 		return
 	}
-	user := Hg.GetUserDb(m.User.ID)
+	user := Hg.GetPlayer(m.User.ID)
 	_, _ = s.ChannelMessageSend(Hg.Config.TrafficChannelID,
 		strings.ReplaceAll(
 			strings.ReplaceAll(
-				Hg.GetLang("welcomeMessage", user.Alluser.Lang), "{{mention}}", m.Mention()),
-				"{{count}}", strconv.Itoa(Hg.GetGuild().MemberCount)))
+				Hg.GetLang("welcomeMessage", user.Lang), "{{mention}}", m.Mention()),
+			"{{count}}", strconv.Itoa(Hg.GetGuild().MemberCount)))
 }
 
 func guildMemberRemove(s *discordgo.Session, m *discordgo.GuildMemberRemove) {
 	if m.GuildID != Hg.Config.GuildID {
 		return
 	}
-	_,_ = s.ChannelMessageSend(Hg.Config.TrafficChannelID,
-		strings.ReplaceAll(Hg.GetLang("byeMessage", "fr"), "{{username}}", m.Mention() + "(`" + m.User.String() + "`)"))
+	_, _ = s.ChannelMessageSend(Hg.Config.TrafficChannelID,
+		strings.ReplaceAll(Hg.GetLang("byeMessage", "fr"), "{{username}}", m.Mention()+"(`"+m.User.String()+"`)"))
 }
 
 func ready(s *discordgo.Session, _ *discordgo.Ready) {
